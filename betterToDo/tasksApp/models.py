@@ -1,9 +1,29 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 
-TASK_NATURE = ("goal", "problem", "action")
-TASK_STATUS = ("active", "resolved", "pending", "omitted")
-# Create your models here.
+TASK_NATURE_CHOICES = [
+    ("goal", "Goal"),
+    ("problem", "Problem"),
+    ("action", "Action"),
+]
+
+TASK_STATUS_CHOICES = [
+    ("active", "Active"),
+    ("resolved", "Resolved"),
+    ("pending", "Pending"),
+    ("omitted", "Omitted"),
+]
+
+COMMENT_NATURE_CHOICES = [
+    ("comment", "Comment"),
+    ("decision", "Decision"),
+    ("resources", "Resources"),
+]
+
+PROJECT_STATUS_CHOICES = [
+    
+]
+
 
 '''# a User model
     # name
@@ -50,22 +70,34 @@ class Project(models.Model):
     # resources/ information
     '''
 class Task(models.Model):
-    task_nature = models.CharField()
-    task_name = models.CharField(max_length=20, blank=False, null=False)
-    priority = models.IntegerField()
-    parent_task = models.ForeignKey("Task", on_delete=models.CASCADE, related_name="child_tasks")
-    dependent_task = models.ManyToManyField("Task", related_name="task_up_next")
-    task_status = models.CharField()
-    date_created = models.DateTimeField(auto_created=True)
-    date_complete = models.DateTimeField()
-    estimate_time = models.IntegerField()
-    deadline = models.DateField()
-    person_in_charger = models.ManyToManyField("User", related_name="task_involved")
-    task_comment = models.TextField()
-    task_decision = models.TextField()
-    task_resources = models.TextField()
-    
+    task_nature = models.CharField(max_length=10, choices=TASK_NATURE_CHOICES, blank=False, null=False)
+    task_name = models.CharField(max_length=255, blank=False, null=False)
+    priority = models.IntegerField(default=0)
+    parent_task = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="child_tasks")
+    dependent_task = models.ManyToManyField("self", symmetrical=False, blank=True, related_name="task_up_next")
+    project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="project_tasks", null=True, blank=True)
+    task_status = models.CharField(max_length=10, choices=TASK_STATUS_CHOICES, default="pending")
+    date_created = models.DateTimeField(auto_now_add=True)
+    date_complete = models.DateTimeField(null=True, blank=True)
+    estimate_time = models.IntegerField(default=0)  # In hours/ days?
+    deadline = models.DateField(null=True, blank=True)
+
+    person_in_charge = models.ManyToManyField("User", related_name="tasks_assigned", blank=True)
+
+    # Removed task_comment, task_decision, task_resources
+
     def __str__(self):
-        return self.task_name
+        return f"{self.task_name} ({self.task_nature})"
 
 
+
+class Comment(models.Model):
+    comment_nature = models.CharField(max_length=10, choices=COMMENT_NATURE_CHOICES, blank=False, null=False)
+    author = models.ForeignKey("User", on_delete=models.DO_NOTHING, related_name="comments_made")
+    task = models.ForeignKey("Task", on_delete=models.DO_NOTHING, related_name="task_comments", null=True, blank=True)
+    project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="project_comments", null=True, blank=True)
+    content = models.TextField(blank=False)
+    date_created = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Comment by {self.author.username} on {self.task.task_name if self.task else self.project.project_title}"
