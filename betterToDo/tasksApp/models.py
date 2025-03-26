@@ -1,27 +1,26 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
+from django.db.models.signals import pre_save
+from django.dispatch import receiver
 
 TASK_NATURE_CHOICES = [
+    ("project", "Project"),
     ("goal", "Goal"),
     ("problem", "Problem"),
     ("action", "Action"),
 ]
 
 TASK_STATUS_CHOICES = [
-    ("active", "Active"),
-    ("resolved", "Resolved"),
     ("pending", "Pending"),
-    ("omitted", "Omitted"),
+    ("active", "Active"),
+    #("complete", "Complete"),
 ]
 
 COMMENT_NATURE_CHOICES = [
-    ("comment", "Comment"),
+    ("general", "General"),
     ("decision", "Decision"),
     ("resources", "Resources"),
-]
-
-PROJECT_STATUS_CHOICES = [
-    
 ]
 
 
@@ -34,24 +33,6 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.username
-
-''' # a Project model
-    # title
-    # Task models that belong to this project
-    # collaborators : list of Users
-    # manager: 1 User
-'''
-class Project(models.Model):
-    project_title = models.CharField(max_length=20, blank=False, null=False)
-    child_tasks = models.ManyToManyField("Task", related_name="parent_project")
-    collaborators = models.ManyToManyField(User, related_name="project_involved")
-    manager = models.ForeignKey(User, on_delete=models.SET_NULL, blank=False, related_name="projects_managed") 
-    '''# additional feature in future: if manager is NULL 
-        # either prompt action to set new manager in message
-        # add a function to get the oldest collaborator to be the manager (if there is collaborator)'''
-    
-    def __str__(self):
-        return self.project_title
 
 
 '''# a Task model
@@ -71,21 +52,47 @@ class Project(models.Model):
     '''
 class Task(models.Model):
     task_nature = models.CharField(max_length=10, choices=TASK_NATURE_CHOICES, blank=False, null=False)
-    task_name = models.CharField(max_length=255, blank=False, null=False)
+    task_name = models.CharField(max_length=50, blank=False, null=False)
     priority = models.IntegerField(default=0)
+    
     parent_task = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="child_tasks")
+    
     dependent_task = models.ManyToManyField("self", symmetrical=False, blank=True, related_name="task_up_next")
-    project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="project_tasks", null=True, blank=True)
+    
     task_status = models.CharField(max_length=10, choices=TASK_STATUS_CHOICES, default="pending")
+    
     date_created = models.DateTimeField(auto_now_add=True)
     date_complete = models.DateTimeField(null=True, blank=True)
     estimate_time = models.IntegerField(default=0)  # In hours/ days?
     deadline = models.DateField(null=True, blank=True)
 
     person_in_charge = models.ManyToManyField("User", related_name="tasks_assigned", blank=True)
+    
+    manager = models.ForeignKey("User", on_delete=models.SET_NULL, null=True, blank=True, related_name="managed_projects")
+    
+    collaborators = models.ManyToManyField("User", related_name="project_involved", blank=True)
+    
+    omitted = models.BooleanField(blank=False, null=False, default=False)
+    complete = models.BooleanField(blank=False, null=False, default=False)
 
     # Removed task_comment, task_decision, task_resources
+    
+    def clean(self):
+        """Validation logic to enforce rules based on `task_nature`."""
+        if self.task_nature == "project":
+            # A "Project" **must** have a manager
+            if self.manager is None:
+                raise ValidationError({"manager": "A project must have a manager."})
+            # A "Project" **must not** have a parent task
+            if self.parent_task is not None:
+                raise ValidationError({"parent_task": "A project cannot have a parent task."})
+        super().clean()
 
+    def save(self, *args, **kwargs):
+        """Ensure clean() is always called before saving."""
+        self.clean()
+        super().save(*args, **kwargs)
+        
     def __str__(self):
         return f"{self.task_name} ({self.task_nature})"
 
@@ -95,9 +102,9 @@ class Comment(models.Model):
     comment_nature = models.CharField(max_length=10, choices=COMMENT_NATURE_CHOICES, blank=False, null=False)
     author = models.ForeignKey("User", on_delete=models.DO_NOTHING, related_name="comments_made")
     task = models.ForeignKey("Task", on_delete=models.DO_NOTHING, related_name="task_comments", null=True, blank=True)
-    project = models.ForeignKey("Project", on_delete=models.CASCADE, related_name="project_comments", null=True, blank=True)
+    project = models.ForeignKey("Task", on_delete=models.DO_NOTHING, related_name="project_comments", null=True, blank=True)
     content = models.TextField(blank=False)
     date_created = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Comment by {self.author.username} on {self.task.task_name if self.task else self.project.project_title}"
+        return f"Comment by {self.author.username} on {self.task.task_name if self.task else self.project.task_name}"
